@@ -1,0 +1,5 @@
+# Python cache directories
+__pycache__/
+database/__pycache__/
+helpers/__pycache__/
+
