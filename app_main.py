@@ -40,6 +40,16 @@ async def log_requests(request, call_next):
     print(f"Response status: {response.status_code}")
     return response
 
+# Root endpoint for health checks and basic info
+@app.get("/")
+async def root():
+    return {
+        "message": "PostrAI Backend API",
+        "status": "running",
+        "version": "1.0.0",
+        "health_check": "/api/health"
+    }
+
 # Health check endpoint
 @app.get("/api/health")
 async def health_check():
