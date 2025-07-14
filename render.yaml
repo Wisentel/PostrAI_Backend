@@ -9,6 +9,8 @@ services:
     envVars:
       - key: MONGODB_URI
         sync: false
+      - key: FRONTEND_URL
+        value: https://postr-ai-frontend.vercel.app
       - key: PORT
         value: 8000
       - key: PYTHONUNBUFFERED

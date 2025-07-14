@@ -10,21 +10,27 @@ from database.mongodb import mongo_manager
 
 app = FastAPI(title="PostrAI API", description="Backend API for PostrAI application")
 
-# Configure CORS with more flexible settings for deployment
+# Get frontend URL from environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://postr-ai-frontend.vercel.app")
+
+# Configure CORS with specific origins
+allowed_origins = [
+    "http://localhost:8080", 
+    "http://127.0.0.1:8080",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",  # Vite dev server
+    FRONTEND_URL,  # Production frontend URL
+    "https://postr-ai-frontend.vercel.app",  # Explicit frontend URL
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080", 
-        "http://127.0.0.1:8080",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://*.onrender.com",
-        "https://*.vercel.app",
-        "https://*.netlify.app"
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
-    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "*"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "Access-Control-Allow-Headers", "Access-Control-Allow-Origin"],
     expose_headers=["*"],
     max_age=3600,
 )
@@ -34,11 +40,42 @@ app.add_middleware(
 async def log_requests(request, call_next):
     print(f"Request: {request.method} {request.url}")
     print(f"Headers: {dict(request.headers)}")
+    print(f"Origin: {request.headers.get('origin', 'No origin header')}")
     
     response = await call_next(request)
     
     print(f"Response status: {response.status_code}")
     return response
+
+# Additional CORS headers middleware as fallback
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    origin = request.headers.get('origin')
+    
+    # Handle preflight requests
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        if origin and origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Max-Age"] = "3600"
+        return response
+    
+    # Handle actual requests
+    response = await call_next(request)
+    
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
+# Handle preflight OPTIONS requests explicitly
+@app.options("/{full_path:path}")
+async def handle_options(full_path: str):
+    return {"message": "OK"}
 
 # Root endpoint for health checks and basic info
 @app.get("/")
@@ -47,7 +84,8 @@ async def root():
         "message": "PostrAI Backend API",
         "status": "running",
         "version": "1.0.0",
-        "health_check": "/api/health"
+        "health_check": "/api/health",
+        "cors_origins": allowed_origins
     }
 
 # Health check endpoint
@@ -73,11 +111,6 @@ async def health_check():
         # Don't fail the health check - API can still serve some endpoints
     
     return health_status
-
-# Explicit OPTIONS handler for signup endpoint
-@app.options("/api/signup")
-async def signup_options():
-    return {"message": "OK"}
 
 
 
