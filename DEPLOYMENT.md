@@ -8,6 +8,15 @@ This guide will help you deploy the PostrAI backend to Render.
 2. A GitHub repository with your code
 3. A MongoDB Atlas database (or any MongoDB instance accessible from the internet)
 
+## ⚠️ Important: MongoDB SSL Configuration
+
+If you encounter SSL handshake errors during deployment, your MongoDB connection has been updated to handle SSL/TLS issues common in cloud environments. The connection configuration now includes:
+
+- SSL context configuration
+- Certificate validation bypass for cloud compatibility
+- Extended timeout settings
+- Connection pooling optimization
+
 ## Deployment Steps
 
 ### 1. Prepare Your Repository
@@ -24,9 +33,27 @@ Make sure your repository contains:
 1. Go to [MongoDB Atlas](https://cloud.mongodb.com/)
 2. Create a new cluster or use an existing one
 3. Create a database user with read/write permissions
-4. Get your connection string (it should look like: `mongodb+srv://username:password@cluster.mongodb.net/database`)
+4. **Important**: Update your IP whitelist to allow connections from `0.0.0.0/0` (all IPs) for Render deployment
+5. Get your connection string in this format:
+   ```
+   mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority&ssl=true&tlsAllowInvalidCertificates=true
+   ```
 
-### 3. Deploy to Render
+### 3. MongoDB Connection String Format
+
+For Render deployment, use this connection string format:
+
+```
+mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority&ssl=true&tlsAllowInvalidCertificates=true&connectTimeoutMS=30000&socketTimeoutMS=30000&serverSelectionTimeoutMS=30000
+```
+
+Replace:
+- `username`: Your MongoDB username
+- `password`: Your MongoDB password
+- `cluster`: Your cluster name
+- `database`: Your database name
+
+### 4. Deploy to Render
 
 #### Option A: Using render.yaml (Recommended)
 
@@ -36,7 +63,7 @@ Make sure your repository contains:
 4. Connect your GitHub repository
 5. Render will automatically detect the `render.yaml` file
 6. Set the required environment variable:
-   - `MONGODB_URI`: Your MongoDB connection string
+   - `MONGODB_URI`: Your MongoDB connection string (with SSL parameters)
 
 #### Option B: Manual Setup
 
@@ -52,30 +79,29 @@ Make sure your repository contains:
    - **Dockerfile Path**: `./Dockerfile`
 
 5. Set environment variables:
-   - `MONGODB_URI`: Your MongoDB connection string
+   - `MONGODB_URI`: Your MongoDB connection string (with SSL parameters)
    - `PORT`: `8000` (automatically set by Render)
 
 6. Click "Create Web Service"
 
-### 4. Configure Environment Variables
+### 5. Configure Environment Variables
 
 In your Render service settings, add:
 
 ```
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority&ssl=true&tlsAllowInvalidCertificates=true&connectTimeoutMS=30000&socketTimeoutMS=30000&serverSelectionTimeoutMS=30000
 PORT=8000
 PYTHONUNBUFFERED=1
 ```
 
-### 5. Update MongoDB Connection String
+### 6. MongoDB Atlas Network Access
 
-Make sure your MongoDB connection string in `database/mongodb.py` uses the environment variable:
+**Critical**: In MongoDB Atlas, make sure to:
+1. Go to "Network Access" in your Atlas dashboard
+2. Add IP Address: `0.0.0.0/0` (Allow access from anywhere)
+3. This is required for Render to connect to your database
 
-```python
-self.uri = os.getenv("MONGODB_URI", "your-fallback-connection-string")
-```
-
-### 6. Update CORS Settings (if needed)
+### 7. Update CORS Settings (if needed)
 
 If you're deploying a frontend, update the CORS origins in `app_main.py` to include your frontend URL:
 
@@ -127,20 +153,40 @@ Access the interactive API documentation at:
 
 4. **Health Checks**: The health check endpoint (`/api/health`) is configured to monitor your service
 
+5. **SSL/TLS**: The MongoDB connection is configured to handle SSL issues in cloud environments
+
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Build Failures**: Check the build logs in Render dashboard
-2. **Connection Issues**: Verify your MongoDB connection string
-3. **CORS Errors**: Update the allowed origins in your FastAPI app
-4. **Port Issues**: Render automatically sets the PORT environment variable
+1. **SSL Handshake Errors**: 
+   - Ensure your MongoDB connection string includes SSL parameters
+   - Check that MongoDB Atlas allows connections from `0.0.0.0/0`
+   - The code has been updated to handle SSL/TLS issues
 
-### Debugging
+2. **Build Failures**: Check the build logs in Render dashboard
 
-- Check the service logs in Render dashboard
-- Test endpoints locally before deploying
-- Verify environment variables are set correctly
+3. **Connection Timeouts**: 
+   - Verify your MongoDB connection string
+   - Check MongoDB Atlas network access settings
+
+4. **CORS Errors**: Update the allowed origins in your FastAPI app
+
+5. **Port Issues**: Render automatically sets the PORT environment variable
+
+### Debugging Steps
+
+1. Check the service logs in Render dashboard
+2. Verify MongoDB Atlas network access is set to `0.0.0.0/0`
+3. Test your MongoDB connection string locally
+4. Ensure environment variables are set correctly in Render
+
+### MongoDB Atlas Checklist
+
+- [ ] Database user created with proper permissions
+- [ ] Network access set to `0.0.0.0/0` (allow from anywhere)
+- [ ] Connection string includes SSL parameters
+- [ ] Database name is correct in the connection string
 
 ## Scaling
 
@@ -149,9 +195,11 @@ For production use, consider:
 - Using a dedicated MongoDB cluster
 - Implementing proper logging and monitoring
 - Adding rate limiting and security measures
+- Restricting MongoDB network access to specific IPs in production
 
 ## Support
 
 - [Render Documentation](https://render.com/docs)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [MongoDB Atlas Documentation](https://docs.atlas.mongodb.com/) 
+- [MongoDB Atlas Documentation](https://docs.atlas.mongodb.com/)
+- [PyMongo SSL Documentation](https://pymongo.readthedocs.io/en/stable/examples/tls.html) 
