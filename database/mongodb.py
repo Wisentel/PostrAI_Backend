@@ -3,7 +3,6 @@ from pymongo.server_api import ServerApi
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 from typing import Dict, List, Optional, Any
 import os
-import ssl
 from datetime import datetime
 import uuid
 import logging
@@ -60,14 +59,10 @@ class MongoDBManager:
                 'waitQueueTimeoutMS': 30000,
                 'retryWrites': True,
                 'w': 'majority',
-                # SSL/TLS configuration
+                # SSL/TLS configuration - using only valid PyMongo options
                 'ssl': True,
                 'tlsAllowInvalidCertificates': True,
                 'tlsAllowInvalidHostnames': True,
-                'tlsInsecure': True,
-                # Additional SSL options for cloud compatibility
-                'ssl_cert_reqs': ssl.CERT_NONE,
-                'ssl_match_hostname': False,
             }
             
             # Create MongoDB client
