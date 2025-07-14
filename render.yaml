@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: postrai-backend
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: PORT
+        value: 8000
+      - key: PYTHONUNBUFFERED
+        value: 1
+    healthCheckPath: /api/health
+    autoDeploy: true
+    buildCommand: ""
+    startCommand: "" 

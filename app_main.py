@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from typing import List, Optional
+import os
 
 from helpers.user import hash_password, check_password
 from models import User, UserSignup, UserResponse, UserLogin, AddUserTopics, TopicPreferenceResponse, GetUserTopics, GetUserTopicsResponse, AddUserDocuments, UserDocumentResponse, GetUserDocuments, GetUserDocumentsResponse, AddResearchPapersMetadata, ResearchPaperMetadataResponse, GetResearchPapersMetadata, AddComment, CommentResponse, GetComments, GetCommentsResponse, UpdateComment, SimpleCommentResponse
@@ -9,10 +10,18 @@ from database.mongodb import mongo_manager
 
 app = FastAPI(title="PostrAI API", description="Backend API for PostrAI application")
 
-# Configure CORS with more explicit settings
+# Configure CORS with more flexible settings for deployment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],  # Include both localhost and 127.0.0.1
+    allow_origins=[
+        "http://localhost:8080", 
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://*.onrender.com",
+        "https://*.vercel.app",
+        "https://*.netlify.app"
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
     allow_headers=["Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With", "*"],
@@ -720,4 +729,5 @@ async def master_scraper(arxiv_url: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app_main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app_main:app", host="0.0.0.0", port=port, reload=True)
