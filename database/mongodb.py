@@ -3,7 +3,6 @@ from pymongo.server_api import ServerApi
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 from typing import Dict, List, Optional, Any
 import os
-import ssl
 from datetime import datetime
 import uuid
 
@@ -18,16 +17,10 @@ class MongoDBManager:
     def connect(self):
         """Connect to MongoDB"""
         try:
-            # SSL/TLS configuration for cloud deployment compatibility
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            
             # Connection options to handle SSL issues in cloud environments
             connection_options = {
                 'server_api': ServerApi('1'),
                 'ssl': True,
-                'ssl_context': ssl_context,
                 'tlsAllowInvalidCertificates': True,
                 'tlsAllowInvalidHostnames': True,
                 'connectTimeoutMS': 30000,
