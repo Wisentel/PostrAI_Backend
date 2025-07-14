@@ -3,8 +3,14 @@ from pymongo.server_api import ServerApi
 from pymongo.errors import ConnectionFailure, DuplicateKeyError
 from typing import Dict, List, Optional, Any
 import os
+import ssl
 from datetime import datetime
 import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class MongoDBManager:
     def __init__(self):
@@ -12,44 +18,87 @@ class MongoDBManager:
         self.uri = os.getenv("MONGODB_URI", "mongodb+srv://athishrajesh:89GaXb80iCkmJ4QX@wisentel.4aeym5h.mongodb.net/?retryWrites=true&w=majority&appName=Wisentel")
         self.client = None
         self.db = None
-        self.connect()
+        self._connected = False
+        
+        # Don't connect immediately - use lazy connection
+        logger.info("MongoDB manager initialized (lazy connection)")
+
+    def _ensure_connection(self):
+        """Ensure MongoDB connection is established (lazy connection)"""
+        if self._connected and self.client is not None:
+            return
+        
+        try:
+            self.connect()
+        except Exception as e:
+            logger.error(f"Failed to establish MongoDB connection: {e}")
+            raise
 
     def connect(self):
-        """Connect to MongoDB"""
+        """Connect to MongoDB with comprehensive SSL/TLS configuration"""
         try:
-            # Connection options to handle SSL issues in cloud environments
+            logger.info("Attempting to connect to MongoDB...")
+            
+            # Parse connection string to handle SSL parameters properly
+            connection_uri = self.uri
+            
+            # Add SSL parameters to connection string if not present
+            if "ssl=true" not in connection_uri.lower():
+                separator = "&" if "?" in connection_uri else "?"
+                ssl_params = "ssl=true&tlsAllowInvalidCertificates=true&tlsAllowInvalidHostnames=true"
+                connection_uri = f"{connection_uri}{separator}{ssl_params}"
+            
+            # Connection options for cloud deployment
             connection_options = {
                 'server_api': ServerApi('1'),
-                'ssl': True,
-                'tlsAllowInvalidCertificates': True,
-                'tlsAllowInvalidHostnames': True,
                 'connectTimeoutMS': 30000,
                 'socketTimeoutMS': 30000,
                 'serverSelectionTimeoutMS': 30000,
                 'maxPoolSize': 10,
+                'minPoolSize': 1,
+                'maxIdleTimeMS': 30000,
+                'waitQueueTimeoutMS': 30000,
                 'retryWrites': True,
-                'w': 'majority'
+                'w': 'majority',
+                # SSL/TLS configuration
+                'ssl': True,
+                'tlsAllowInvalidCertificates': True,
+                'tlsAllowInvalidHostnames': True,
+                'tlsInsecure': True,
+                # Additional SSL options for cloud compatibility
+                'ssl_cert_reqs': ssl.CERT_NONE,
+                'ssl_match_hostname': False,
             }
             
-            self.client = MongoClient(self.uri, **connection_options)
+            # Create MongoDB client
+            self.client = MongoClient(connection_uri, **connection_options)
             
-            # Test the connection
+            # Test the connection with a simple ping
+            logger.info("Testing MongoDB connection...")
             self.client.admin.command('ping')
-            print("Successfully connected to MongoDB!")
+            logger.info("Successfully connected to MongoDB!")
             
             # Select database
             self.db = self.client["PostrAI_db"]
+            self._connected = True
             
             # Create indexes for better performance
             self.create_indexes()
             
         except ConnectionFailure as e:
-            print(f"Failed to connect to MongoDB: {e}")
+            logger.error(f"MongoDB connection failed: {e}")
+            self._connected = False
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during MongoDB connection: {e}")
+            self._connected = False
             raise
 
     def create_indexes(self):
         """Create database indexes for better performance"""
         try:
+            logger.info("Creating database indexes...")
+            
             # Create unique index on email for user_profile collection
             self.db.user_profile.create_index("email", unique=True)
             
@@ -76,19 +125,26 @@ class MongoDBManager:
             self.db.comments.create_index("created_at")
             self.db.comments.create_index([("document_id", 1), ("created_at", -1)])  # For efficient comment retrieval
             
-            print("Database indexes created successfully")
+            logger.info("Database indexes created successfully")
         except Exception as e:
-            print(f"Error creating indexes: {e}")
+            logger.error(f"Error creating indexes: {e}")
+            # Don't raise here - indexes are not critical for basic functionality
 
     def close_connection(self):
         """Close MongoDB connection"""
         if self.client:
             self.client.close()
-            print("MongoDB connection closed")
+            self._connected = False
+            logger.info("MongoDB connection closed")
+
+    def is_connected(self):
+        """Check if MongoDB is connected"""
+        return self._connected and self.client is not None
 
     # User Profile Operations
     def create_user(self, user_data: Dict) -> Dict:
         """Create a new user in the database"""
+        self._ensure_connection()
         try:
             # Add metadata
             user_data["user_id"] = str(uuid.uuid4())[:6]  # 6-character user ID
@@ -109,33 +165,36 @@ class MongoDBManager:
         except DuplicateKeyError:
             raise ValueError("Email already exists")
         except Exception as e:
-            print(f"Error creating user: {e}")
+            logger.error(f"Error creating user: {e}")
             raise
 
     def find_user_by_email(self, email: str) -> Optional[Dict]:
         """Find user by email"""
+        self._ensure_connection()
         try:
             user = self.db.user_profile.find_one({"email": email})
             if user:
                 user["id"] = str(user.pop("_id"))  # Convert ObjectId to string
             return user
         except Exception as e:
-            print(f"Error finding user by email: {e}")
+            logger.error(f"Error finding user by email: {e}")
             return None
 
     def find_user_by_id(self, user_id: str) -> Optional[Dict]:
         """Find user by user_id"""
+        self._ensure_connection()
         try:
             user = self.db.user_profile.find_one({"user_id": user_id})
             if user:
                 user["id"] = str(user.pop("_id"))  # Convert ObjectId to string
             return user
         except Exception as e:
-            print(f"Error finding user by ID: {e}")
+            logger.error(f"Error finding user by ID: {e}")
             return None
 
     def update_user(self, user_id: str, update_data: Dict) -> bool:
         """Update user information"""
+        self._ensure_connection()
         try:
             update_data["updated_at"] = datetime.now().isoformat()
             result = self.db.user_profile.update_one(
@@ -144,32 +203,35 @@ class MongoDBManager:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating user: {e}")
+            logger.error(f"Error updating user: {e}")
             return False
 
     def delete_user(self, user_id: str) -> bool:
         """Delete user by user_id"""
+        self._ensure_connection()
         try:
             result = self.db.user_profile.delete_one({"user_id": user_id})
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting user: {e}")
+            logger.error(f"Error deleting user: {e}")
             return False
 
     def get_all_users(self, limit: int = 100, skip: int = 0) -> List[Dict]:
         """Get all users with pagination"""
+        self._ensure_connection()
         try:
             users = list(self.db.user_profile.find({}, {"password": 0}).limit(limit).skip(skip))
             for user in users:
                 user["id"] = str(user.pop("_id"))  # Convert ObjectId to string
             return users
         except Exception as e:
-            print(f"Error getting all users: {e}")
+            logger.error(f"Error getting all users: {e}")
             return []
 
     # Topic Preference Operations
     def add_user_topics(self, user_id: str, topics: List[str]) -> List[Dict]:
         """Add topics for a user"""
+        self._ensure_connection()
         try:
             # Check if user exists
             user = self.find_user_by_id(user_id)
@@ -199,7 +261,7 @@ class MongoDBManager:
                         
                 except DuplicateKeyError:
                     # Topic already exists for this user, skip it
-                    print(f"Topic '{topic_name}' already exists for user {user_id}")
+                    logger.info(f"Topic '{topic_name}' already exists for user {user_id}")
                     continue
                     
             return created_topics
@@ -207,22 +269,24 @@ class MongoDBManager:
         except ValueError:
             raise
         except Exception as e:
-            print(f"Error adding user topics: {e}")
+            logger.error(f"Error adding user topics: {e}")
             raise
 
     def get_user_topics(self, user_id: str) -> List[Dict]:
         """Get all topics for a user"""
+        self._ensure_connection()
         try:
             topics = list(self.db.topic_preferences.find({"user_id": user_id}))
             for topic in topics:
                 topic["id"] = str(topic.pop("_id"))
             return topics
         except Exception as e:
-            print(f"Error getting user topics: {e}")
+            logger.error(f"Error getting user topics: {e}")
             return []
 
     def update_topic_status(self, user_id: str, topic_name: str, status: str) -> bool:
         """Update topic status for a user"""
+        self._ensure_connection()
         try:
             result = self.db.topic_preferences.update_one(
                 {"user_id": user_id, "topic_name": topic_name},
@@ -230,23 +294,25 @@ class MongoDBManager:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating topic status: {e}")
+            logger.error(f"Error updating topic status: {e}")
             return False
 
     def delete_user_topic(self, user_id: str, topic_name: str) -> bool:
         """Delete a specific topic for a user"""
+        self._ensure_connection()
         try:
             result = self.db.topic_preferences.delete_one(
                 {"user_id": user_id, "topic_name": topic_name}
             )
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting user topic: {e}")
+            logger.error(f"Error deleting user topic: {e}")
             return False
 
     # User Document Operations
     def add_user_documents(self, user_id: str, document_ids: List[str], folder: str = "my_papers", is_favorite: bool = False) -> List[Dict]:
         """Add documents for a user"""
+        self._ensure_connection()
         try:
             # Check if user exists
             user = self.find_user_by_id(user_id)
@@ -282,7 +348,7 @@ class MongoDBManager:
                         
                 except DuplicateKeyError:
                     # Document already exists for this user, skip it
-                    print(f"Document '{document_id}' already exists for user {user_id}")
+                    logger.info(f"Document '{document_id}' already exists for user {user_id}")
                     continue
                     
             return created_documents
@@ -290,11 +356,12 @@ class MongoDBManager:
         except ValueError:
             raise
         except Exception as e:
-            print(f"Error adding user documents: {e}")
+            logger.error(f"Error adding user documents: {e}")
             raise
 
     def get_user_documents(self, user_id: str, folder: Optional[str] = None) -> List[Dict]:
         """Get all documents for a user, optionally filtered by folder"""
+        self._ensure_connection()
         try:
             query = {"user_id": user_id}
             if folder:
@@ -305,11 +372,12 @@ class MongoDBManager:
                 doc["id"] = str(doc.pop("_id"))
             return documents
         except Exception as e:
-            print(f"Error getting user documents: {e}")
+            logger.error(f"Error getting user documents: {e}")
             return []
 
     def update_user_document(self, user_id: str, document_id: str, update_data: Dict) -> bool:
         """Update user document relationship"""
+        self._ensure_connection()
         try:
             update_data["updated_at"] = datetime.now().isoformat()
             result = self.db.user_documents.update_one(
@@ -318,34 +386,37 @@ class MongoDBManager:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating user document: {e}")
+            logger.error(f"Error updating user document: {e}")
             return False
 
     def delete_user_document(self, user_id: str, document_id: str) -> bool:
         """Delete a specific document relationship for a user"""
+        self._ensure_connection()
         try:
             result = self.db.user_documents.delete_one(
                 {"user_id": user_id, "document_id": document_id}
             )
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting user document: {e}")
+            logger.error(f"Error deleting user document: {e}")
             return False
 
     def get_user_favorites(self, user_id: str) -> List[Dict]:
         """Get all favorite documents for a user"""
+        self._ensure_connection()
         try:
             documents = list(self.db.user_documents.find({"user_id": user_id, "is_favorite": True}))
             for doc in documents:
                 doc["id"] = str(doc.pop("_id"))
             return documents
         except Exception as e:
-            print(f"Error getting user favorites: {e}")
+            logger.error(f"Error getting user favorites: {e}")
             return []
 
     # Research Papers Metadata Operations
     def add_research_papers_metadata(self, papers_metadata: List[Dict]) -> List[Dict]:
         """Add research papers metadata to the database"""
+        self._ensure_connection()
         try:
             created_papers = []
             for paper_data in papers_metadata:
@@ -376,7 +447,7 @@ class MongoDBManager:
                         
                 except DuplicateKeyError:
                     # Paper already exists, try to update it instead
-                    print(f"Paper '{paper_data['document_id']}' already exists, updating...")
+                    logger.info(f"Paper '{paper_data['document_id']}' already exists, updating...")
                     
                     update_data = {
                         "title": paper_data["title"],
@@ -406,33 +477,36 @@ class MongoDBManager:
             return created_papers
             
         except Exception as e:
-            print(f"Error adding research papers metadata: {e}")
+            logger.error(f"Error adding research papers metadata: {e}")
             raise
 
     def get_research_papers_metadata(self, document_ids: List[str]) -> List[Dict]:
         """Get research papers metadata by document IDs"""
+        self._ensure_connection()
         try:
             papers = list(self.db.research_papers_metadata.find({"document_id": {"$in": document_ids}}))
             for paper in papers:
                 paper["id"] = str(paper.pop("_id"))
             return papers
         except Exception as e:
-            print(f"Error getting research papers metadata: {e}")
+            logger.error(f"Error getting research papers metadata: {e}")
             return []
 
     def get_research_paper_by_id(self, document_id: str) -> Optional[Dict]:
         """Get a single research paper metadata by document ID"""
+        self._ensure_connection()
         try:
             paper = self.db.research_papers_metadata.find_one({"document_id": document_id})
             if paper:
                 paper["id"] = str(paper.pop("_id"))
             return paper
         except Exception as e:
-            print(f"Error getting research paper by ID: {e}")
+            logger.error(f"Error getting research paper by ID: {e}")
             return None
 
     def update_research_paper_metadata(self, document_id: str, update_data: Dict) -> bool:
         """Update research paper metadata"""
+        self._ensure_connection()
         try:
             update_data["updated_at"] = datetime.now().isoformat()
             result = self.db.research_papers_metadata.update_one(
@@ -441,20 +515,22 @@ class MongoDBManager:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating research paper metadata: {e}")
+            logger.error(f"Error updating research paper metadata: {e}")
             return False
 
     def delete_research_paper_metadata(self, document_id: str) -> bool:
         """Delete research paper metadata"""
+        self._ensure_connection()
         try:
             result = self.db.research_papers_metadata.delete_one({"document_id": document_id})
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting research paper metadata: {e}")
+            logger.error(f"Error deleting research paper metadata: {e}")
             return False
 
     def search_research_papers(self, query: str, limit: int = 50) -> List[Dict]:
         """Search research papers by title, abstract, authors, or labels"""
+        self._ensure_connection()
         try:
             # Create text search query
             search_query = {
@@ -472,12 +548,13 @@ class MongoDBManager:
                 paper["id"] = str(paper.pop("_id"))
             return papers
         except Exception as e:
-            print(f"Error searching research papers: {e}")
+            logger.error(f"Error searching research papers: {e}")
             return []
 
     # Comments Operations
     def add_comment(self, document_id: str, user_id: str, comment_text: str) -> Dict:
         """Add a comment to a research paper"""
+        self._ensure_connection()
         try:
             # Check if user exists
             user = self.find_user_by_id(user_id)
@@ -515,11 +592,12 @@ class MongoDBManager:
         except ValueError:
             raise
         except Exception as e:
-            print(f"Error adding comment: {e}")
+            logger.error(f"Error adding comment: {e}")
             raise
 
     def get_comments_by_document(self, document_id: str, limit: int = 100, skip: int = 0) -> List[Dict]:
         """Get all comments for a specific research paper"""
+        self._ensure_connection()
         try:
             comments = list(
                 self.db.comments.find({"document_id": document_id})
@@ -531,11 +609,12 @@ class MongoDBManager:
                 comment["id"] = str(comment.pop("_id"))
             return comments
         except Exception as e:
-            print(f"Error getting comments by document: {e}")
+            logger.error(f"Error getting comments by document: {e}")
             return []
 
     def get_comments_by_user(self, user_id: str, limit: int = 100, skip: int = 0) -> List[Dict]:
         """Get all comments by a specific user"""
+        self._ensure_connection()
         try:
             comments = list(
                 self.db.comments.find({"user_id": user_id})
@@ -547,11 +626,12 @@ class MongoDBManager:
                 comment["id"] = str(comment.pop("_id"))
             return comments
         except Exception as e:
-            print(f"Error getting comments by user: {e}")
+            logger.error(f"Error getting comments by user: {e}")
             return []
 
     def update_comment(self, comment_id: str, user_id: str, comment_text: str) -> bool:
         """Update a comment (only by the original author)"""
+        self._ensure_connection()
         try:
             result = self.db.comments.update_one(
                 {"comment_id": comment_id, "user_id": user_id},  # Ensure user can only update their own comments
@@ -559,52 +639,57 @@ class MongoDBManager:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating comment: {e}")
+            logger.error(f"Error updating comment: {e}")
             return False
 
     def delete_comment(self, comment_id: str, user_id: str) -> bool:
         """Delete a comment (only by the original author)"""
+        self._ensure_connection()
         try:
             result = self.db.comments.delete_one(
                 {"comment_id": comment_id, "user_id": user_id}  # Ensure user can only delete their own comments
             )
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting comment: {e}")
+            logger.error(f"Error deleting comment: {e}")
             return False
 
     def get_comment_by_id(self, comment_id: str) -> Optional[Dict]:
         """Get a single comment by comment ID"""
+        self._ensure_connection()
         try:
             comment = self.db.comments.find_one({"comment_id": comment_id})
             if comment:
                 comment["id"] = str(comment.pop("_id"))
             return comment
         except Exception as e:
-            print(f"Error getting comment by ID: {e}")
+            logger.error(f"Error getting comment by ID: {e}")
             return None
 
     def count_comments_by_document(self, document_id: str) -> int:
         """Count total comments for a specific research paper"""
+        self._ensure_connection()
         try:
             return self.db.comments.count_documents({"document_id": document_id})
         except Exception as e:
-            print(f"Error counting comments by document: {e}")
+            logger.error(f"Error counting comments by document: {e}")
             return 0
 
     # Generic collection operations
     def insert_document(self, collection_name: str, document: Dict) -> str:
         """Insert a document into any collection"""
+        self._ensure_connection()
         try:
             document["created_at"] = datetime.now().isoformat()
             result = self.db[collection_name].insert_one(document)
             return str(result.inserted_id)
         except Exception as e:
-            print(f"Error inserting document: {e}")
+            logger.error(f"Error inserting document: {e}")
             raise
 
     def find_documents(self, collection_name: str, query: Dict = None, limit: int = 100) -> List[Dict]:
         """Find documents in any collection"""
+        self._ensure_connection()
         try:
             query = query or {}
             documents = list(self.db[collection_name].find(query).limit(limit))
@@ -612,27 +697,29 @@ class MongoDBManager:
                 doc["id"] = str(doc.pop("_id"))  # Convert ObjectId to string
             return documents
         except Exception as e:
-            print(f"Error finding documents: {e}")
+            logger.error(f"Error finding documents: {e}")
             return []
 
     def update_document(self, collection_name: str, query: Dict, update_data: Dict) -> bool:
         """Update document in any collection"""
+        self._ensure_connection()
         try:
             update_data["updated_at"] = datetime.now().isoformat()
             result = self.db[collection_name].update_one(query, {"$set": update_data})
             return result.modified_count > 0
         except Exception as e:
-            print(f"Error updating document: {e}")
+            logger.error(f"Error updating document: {e}")
             return False
 
     def delete_document(self, collection_name: str, query: Dict) -> bool:
         """Delete document from any collection"""
+        self._ensure_connection()
         try:
             result = self.db[collection_name].delete_one(query)
             return result.deleted_count > 0
         except Exception as e:
-            print(f"Error deleting document: {e}")
+            logger.error(f"Error deleting document: {e}")
             return False
 
-# Global MongoDB manager instance
+# Create MongoDB manager instance (lazy initialization)
 mongo_manager = MongoDBManager() 

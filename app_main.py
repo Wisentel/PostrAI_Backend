@@ -43,7 +43,26 @@ async def log_requests(request, call_next):
 # Health check endpoint
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "message": "API is running"}
+    health_status = {
+        "status": "ok",
+        "message": "API is running",
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    # Check MongoDB connection status
+    try:
+        if mongo_manager.is_connected():
+            health_status["database"] = "connected"
+        else:
+            # Try to connect if not connected
+            mongo_manager._ensure_connection()
+            health_status["database"] = "connected"
+    except Exception as e:
+        health_status["database"] = "disconnected"
+        health_status["database_error"] = str(e)
+        # Don't fail the health check - API can still serve some endpoints
+    
+    return health_status
 
 # Explicit OPTIONS handler for signup endpoint
 @app.options("/api/signup")
