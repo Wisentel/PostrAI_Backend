@@ -22,7 +22,7 @@ allowed_origins = [
     "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",  # Vite dev server
     FRONTEND_URL,  # Production frontend URL
-    "https://postr-ai-frontend.vercel.app",  # Explicit frontend URL
+    "https://postr-ai-frontend-green.vercel.app",  # Explicit frontend URL
 ]
 
 app.add_middleware(
