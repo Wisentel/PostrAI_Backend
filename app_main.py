@@ -11,7 +11,7 @@ from database.mongodb import mongo_manager
 app = FastAPI(title="PostrAI API", description="Backend API for PostrAI application")
 
 # Get frontend URL from environment variable
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://postr-ai-frontend.vercel.app")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://postr-ai-frontend-green.vercel.app")
 
 # Configure CORS with specific origins
 allowed_origins = [
